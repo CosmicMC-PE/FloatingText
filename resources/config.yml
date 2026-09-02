@@ -3,3 +3,6 @@
 # The file name of the database storing the floating text data
 # DO NOT set this to config.yml
 database-file: data.sqlite
+
+# Value used to replace the {ip} placeholder on floating texts
+placeholder-ip: ""

@@ -29,10 +29,24 @@ use function sprintf;
 
 final class FloatingTextCommandExecutor implements CommandExecutor{
 
+	private const TICKING_PLACEHOLDERS = ["{online}", "{max_players}", "{tps}", "{date}", "{time}"];
+
 	public function __construct(
 		private Database $database,
 		private WorldManager $world_manager
 	){}
+
+	private function validateLine(string $line) : void{
+		if(!str_contains($line, "{user}")){
+			return;
+		}
+
+		foreach(self::TICKING_PLACEHOLDERS as $placeholder){
+			if(str_contains($line, $placeholder)){
+				throw new CommandException("Cannot use {user} together with {$placeholder} on the same floating text.");
+			}
+		}
+	}
 
 	/**
 	 * @param Position $pos
@@ -40,11 +54,17 @@ final class FloatingTextCommandExecutor implements CommandExecutor{
 	 * @param Closure(int, FloatingText) : void $callback
 	 */
 	private function addFloatingText(Position $pos, string $line, Closure $callback) : void{
+		$this->validateLine($line);
 		$text = new FloatingText($pos->getWorld()->getFolderName(), $pos->x, $pos->y, $pos->z, $line);
 		$this->database->add($text, function(int $id) use($pos, $text, $callback) : void{
 			$this->world_manager->get($pos->getWorld())->add($id, $text);
 			$callback($id, $text);
 		});
+	}
+
+	private function updateFloatingText(WorldInstance $world, int $id, FloatingText $text) : void{
+		$this->validateLine($text->line);
+		$world->update($id, $text);
 	}
 
 	private function parseInt(string $argument, string $name) : int{
@@ -115,7 +135,7 @@ final class FloatingTextCommandExecutor implements CommandExecutor{
 
 					$line = TextFormat::colorize(implode(" ", array_slice($args, 2)));
 					$text = new FloatingText($text->world, $text->x, $text->y, $text->z, $line . TextFormat::EOL . $text->line);
-					$world->update($id, $text);
+					$this->updateFloatingText($world, $id, $text);
 
 					$sender->sendMessage(TextFormat::GREEN . "Prepended floating text #{$id}!");
 					$sender->sendMessage(TextFormat::GREEN . sprintf("Position: x=%.4f, y=%.4f, z=%.4f, world=%s", $text->x, $text->y, $text->z, $text->world));
@@ -135,7 +155,7 @@ final class FloatingTextCommandExecutor implements CommandExecutor{
 
 					$line = TextFormat::colorize(implode(" ", array_slice($args, 2)));
 					$text = new FloatingText($text->world, $text->x, $text->y, $text->z, $text->line . TextFormat::EOL . $line);
-					$world->update($id, $text);
+					$this->updateFloatingText($world, $id, $text);
 
 					$sender->sendMessage(TextFormat::GREEN . "Appended floating text #{$id}!");
 					$sender->sendMessage(TextFormat::GREEN . sprintf("Position: x=%.4f, y=%.4f, z=%.4f, world=%s", $text->x, $text->y, $text->z, $text->world));
@@ -156,7 +176,7 @@ final class FloatingTextCommandExecutor implements CommandExecutor{
 					$line = explode(TextFormat::EOL, $text->line);
 					$shifted = array_shift($line);
 					$text = new FloatingText($text->world, $text->x, $text->y, $text->z, implode(TextFormat::EOL, $line));
-					$world->update($id, $text);
+					$this->updateFloatingText($world, $id, $text);
 
 					$sender->sendMessage(TextFormat::GREEN . "Shifted floating text #{$id}!");
 					$sender->sendMessage(TextFormat::GREEN . sprintf("Position: x=%.4f, y=%.4f, z=%.4f, world=%s", $text->x, $text->y, $text->z, $text->world));
@@ -177,7 +197,7 @@ final class FloatingTextCommandExecutor implements CommandExecutor{
 					$line = explode(TextFormat::EOL, $text->line);
 					$pop = array_pop($line);
 					$text = new FloatingText($text->world, $text->x, $text->y, $text->z, implode(TextFormat::EOL, $line));
-					$world->update($id, $text);
+					$this->updateFloatingText($world, $id, $text);
 
 					$sender->sendMessage(TextFormat::GREEN . "Popped floating text #{$id}!");
 					$sender->sendMessage(TextFormat::GREEN . sprintf("Position: x=%.4f, y=%.4f, z=%.4f, world=%s", $text->x, $text->y, $text->z, $text->world));
@@ -203,7 +223,7 @@ final class FloatingTextCommandExecutor implements CommandExecutor{
 					}
 
 					$text = new FloatingText($text->world, $text->x, $text->y - ($step * count($lines) * 0.5), $text->z, array_shift($lines));
-					$world->update($id, $text);
+					$this->updateFloatingText($world, $id, $text);
 					$offset = $step;
 					foreach($lines as $line){
 						$this->addFloatingText(new Position($text->x, $text->y + $offset, $text->z, $sender->getWorld()), $line, static function(int $id, FloatingText $text) : void{});
@@ -259,7 +279,7 @@ final class FloatingTextCommandExecutor implements CommandExecutor{
 
 					$lines[$line_number - 1] = $new_text = TextFormat::colorize(implode(" ", array_slice($args, 3)));
 					$text = new FloatingText($text->world, $text->x, $text->y, $text->z, implode(TextFormat::EOL, $lines));
-					$world->update($id, $text);
+					$this->updateFloatingText($world, $id, $text);
 
 					$sender->sendMessage(TextFormat::GREEN . "Updated floating text #{$id}'s line #{$line_number}!");
 					$sender->sendMessage(TextFormat::GREEN . sprintf("Position: x=%.4f, y=%.4f, z=%.4f, world=%s", $text->x, $text->y, $text->z, $text->world));

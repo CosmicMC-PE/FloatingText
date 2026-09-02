@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace cosmicpe\floatingtext;
 
 use cosmicpe\floatingtext\db\Database;
+use cosmicpe\floatingtext\handler\FloatingTextFindAndReplaceHandler;
+use cosmicpe\floatingtext\handler\FloatingTextFindAndReplaceTickerHandler;
 use cosmicpe\floatingtext\handler\FloatingTextHandlerManager;
 use cosmicpe\floatingtext\world\WorldManager;
 use pocketmine\command\PluginCommand;
@@ -37,6 +39,20 @@ final class Loader extends PluginBase{
 			throw new RuntimeException("Cannot find command \"floatingtext\"");
 		}
 		$command->setExecutor(new FloatingTextCommandExecutor($this->database, $this->world_manager));
+
+		$this->registerPlaceholders();
+	}
+
+	private function registerPlaceholders() : void{
+		$server = $this->getServer();
+
+		$this->handler_manager->register(new FloatingTextFindAndReplaceHandler("{ip}", (string) $this->getConfig()->get("placeholder-ip")));
+
+		$this->handler_manager->register(new FloatingTextFindAndReplaceTickerHandler($this, "{online}", fn() : string => (string) count($server->getOnlinePlayers()), 100));
+		$this->handler_manager->register(new FloatingTextFindAndReplaceTickerHandler($this, "{max_players}", fn() : string => (string) $server->getMaxPlayers(), 100));
+		$this->handler_manager->register(new FloatingTextFindAndReplaceTickerHandler($this, "{tps}", fn() : string => number_format($server->getTicksPerSecondAverage(), 2), 20));
+		$this->handler_manager->register(new FloatingTextFindAndReplaceTickerHandler($this, "{date}", fn() : string => date("Y-m-d"), 1200));
+		$this->handler_manager->register(new FloatingTextFindAndReplaceTickerHandler($this, "{time}", fn() : string => date("H:i"), 1200));
 	}
 
 	protected function onDisable() : void{

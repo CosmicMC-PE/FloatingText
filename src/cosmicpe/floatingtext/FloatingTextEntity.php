@@ -16,6 +16,8 @@ use pocketmine\network\mcpe\convert\TypeConverter;
 use pocketmine\network\mcpe\protocol\types\entity\EntityIds;
 use pocketmine\network\mcpe\protocol\types\entity\EntityMetadataCollection;
 use pocketmine\network\mcpe\protocol\types\entity\EntityMetadataProperties;
+use pocketmine\network\mcpe\protocol\types\entity\StringMetadataProperty;
+use pocketmine\player\Player;
 use pocketmine\world\World;
 
 class FloatingTextEntity extends Entity{
@@ -26,6 +28,7 @@ class FloatingTextEntity extends Entity{
 
 	private int $floating_text_id;
 	private FloatingText $floating_text;
+	private bool $has_user_placeholder;
 
 	/** @var array<int, Closure> */
 	private array $despawn_callbacks = [];
@@ -34,6 +37,7 @@ class FloatingTextEntity extends Entity{
 		$this->setCanSaveWithChunk(false);
 		$this->floating_text_id = $text_id;
 		$this->floating_text = $text;
+		$this->has_user_placeholder = str_contains($text->line, "{user}");
 		$this->keepMovement = true;
 		$this->gravity = 0.0;
 		$this->gravityEnabled = false;
@@ -116,6 +120,22 @@ class FloatingTextEntity extends Entity{
 		parent::setNameTag($name);
 		$this->sendData($this->hasSpawned, $this->getDirtyNetworkData());
 		$this->getNetworkProperties()->clearDirtyProperties();
+		if($this->has_user_placeholder){
+			foreach($this->hasSpawned as $player){
+				$this->sendPersonalizedNameTag($player);
+			}
+		}
+	}
+
+	protected function sendSpawnPacket(Player $player) : void{
+		parent::sendSpawnPacket($player);
+		if($this->has_user_placeholder){
+			$this->sendPersonalizedNameTag($player);
+		}
+	}
+
+	private function sendPersonalizedNameTag(Player $player) : void{
+		$this->sendData([$player], [EntityMetadataProperties::NAMETAG => new StringMetadataProperty(str_replace("{user}", $player->getName(), $this->getNameTag()))]);
 	}
 
 	public function executeFloatingTextDespawnHooks() : void{
