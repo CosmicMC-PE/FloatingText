@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace cosmicpe\floatingtext;
 
 use cosmicpe\floatingtext\db\Database;
+use cosmicpe\floatingtext\form\FloatingTextForm;
 use cosmicpe\floatingtext\handler\FloatingTextFindAndReplaceHandler;
 use cosmicpe\floatingtext\handler\FloatingTextFindAndReplaceTickerHandler;
 use cosmicpe\floatingtext\handler\FloatingTextHandlerManager;
@@ -38,7 +39,8 @@ final class Loader extends PluginBase{
 		if(!($command instanceof PluginCommand)){
 			throw new RuntimeException("Cannot find command \"floatingtext\"");
 		}
-		$command->setExecutor(new FloatingTextCommandExecutor($this->database, $this->world_manager));
+		$service = new FloatingTextService($this->database, $this->world_manager);
+		$command->setExecutor(new FloatingTextCommandExecutor($service, $this->world_manager, new FloatingTextForm($service)));
 
 		$this->registerPlaceholders();
 	}
