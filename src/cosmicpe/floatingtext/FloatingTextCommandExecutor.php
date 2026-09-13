@@ -19,10 +19,25 @@ use function array_pop;
 use function array_shift;
 use function array_slice;
 use function assert;
+use function basename;
 use function count;
+use function date;
 use function explode;
+use function file_get_contents;
+use function file_put_contents;
 use function implode;
+use function is_array;
+use function is_dir;
+use function is_file;
+use function is_numeric;
+use function is_string;
+use function json_decode;
+use function json_encode;
+use function mkdir;
 use function sprintf;
+use const JSON_PRETTY_PRINT;
+use const JSON_UNESCAPED_SLASHES;
+use const JSON_UNESCAPED_UNICODE;
 
 final class FloatingTextCommandExecutor implements CommandExecutor{
 
@@ -38,13 +53,16 @@ final class FloatingTextCommandExecutor implements CommandExecutor{
 			TextFormat::BLUE . "/{$label} set <id> <...text>" . TextFormat::GRAY . " - Changes an existing line's value on a floating text" . TextFormat::EOL .
 			TextFormat::BLUE . "/{$label} move <id>" . TextFormat::GRAY . " - Moves a floating text to your location" . TextFormat::EOL .
 			TextFormat::BLUE . "/{$label} near" . TextFormat::GRAY . " - Lists all floating texts near your location" . TextFormat::EOL .
-			TextFormat::BLUE . "/{$label} remove <id>" . TextFormat::GRAY . " - Removes a floating text";
+			TextFormat::BLUE . "/{$label} remove <id>" . TextFormat::GRAY . " - Removes a floating text" . TextFormat::EOL .
+			TextFormat::BLUE . "/{$label} export [world]" . TextFormat::GRAY . " - Exports floating texts to a JSON file, to migrate them to another server" . TextFormat::EOL .
+			TextFormat::BLUE . "/{$label} import <file>" . TextFormat::GRAY . " - Imports floating texts from a previously exported JSON file";
 	}
 
 	public function __construct(
 		private FloatingTextService $service,
 		private WorldManager $world_manager,
-		private FloatingTextForm $form
+		private FloatingTextForm $form,
+		private Loader $loader
 	){}
 
 	private function parseInt(string $argument, string $name) : int{
@@ -66,6 +84,11 @@ final class FloatingTextCommandExecutor implements CommandExecutor{
 	 * @param string[] $args
 	 */
 	private function executeCommand(CommandSender $sender, Command $command, string $label, array $args) : void{
+		if(isset($args[0]) && ($args[0] === "export" || $args[0] === "import")){
+			$this->executeMigrationCommand($sender, $label, $args);
+			return;
+		}
+
 		if(!($sender instanceof Player)){
 			throw new CommandException("This command must be used as a player.");
 		}
@@ -360,6 +383,88 @@ final class FloatingTextCommandExecutor implements CommandExecutor{
 		}
 
 		throw new CommandException(self::help($label));
+	}
+
+	/**
+	 * @param CommandSender $sender
+	 * @param string[] $args
+	 */
+	private function executeMigrationCommand(CommandSender $sender, string $label, array $args) : void{
+		$exports_dir = $this->loader->getDataFolder() . "exports/";
+		if(!is_dir($exports_dir)){
+			mkdir($exports_dir, 0777, true);
+		}
+
+		if($args[0] === "export"){
+			$world_filter = $args[1] ?? null;
+			$respond = function(array $texts) use($sender, $exports_dir, $world_filter, $label) : void{
+				$data = [];
+				foreach($texts as $id => $text){
+					assert($text instanceof FloatingText);
+					$data[] = ["id" => $id, "world" => $text->world, "x" => $text->x, "y" => $text->y, "z" => $text->z, "line" => $text->line];
+				}
+
+				$filename = "floatingtexts_" . ($world_filter ?? "all") . "_" . date("Y-m-d_His") . ".json";
+				file_put_contents($exports_dir . $filename, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+
+				$sender->sendMessage(TextFormat::GREEN . "Exported " . count($data) . " floating text(s) to " . TextFormat::WHITE . "exports/{$filename}");
+				$sender->sendMessage(TextFormat::GRAY . "Copy this file into the other server's plugin_data/FloatingText/exports/ folder, then run " . TextFormat::WHITE . "/{$label} import {$filename}" . TextFormat::GRAY . " there.");
+			};
+
+			if($world_filter === null){
+				$this->loader->getDatabase()->loadAll($respond);
+			}else{
+				$this->loader->getDatabase()->load($world_filter, $respond);
+			}
+			return;
+		}
+
+		// import
+		if(!isset($args[1])){
+			throw new CommandException("Usage: /{$label} import <file>" . TextFormat::EOL . TextFormat::GRAY . "Hint: Use " . TextFormat::RED . "/{$label} export" . TextFormat::GRAY . " on the source server first, then copy the resulting file into this server's exports/ folder.");
+		}
+
+		$filename = basename($args[1]);
+		$path = $exports_dir . $filename;
+		if(!is_file($path)){
+			throw new CommandException("File not found: exports/{$filename}");
+		}
+
+		$contents = file_get_contents($path);
+		$data = $contents === false ? null : json_decode($contents, true);
+		if(!is_array($data)){
+			throw new CommandException("File exports/{$filename} is not a valid floating text export.");
+		}
+
+		$pm_world_manager = $this->loader->getServer()->getWorldManager();
+		$imported = 0;
+		$skipped = 0;
+		foreach($data as $entry){
+			if(
+				!is_array($entry) ||
+				!isset($entry["world"], $entry["x"], $entry["y"], $entry["z"], $entry["line"]) ||
+				!is_string($entry["world"]) ||
+				!is_numeric($entry["x"]) || !is_numeric($entry["y"]) || !is_numeric($entry["z"]) ||
+				!is_string($entry["line"])
+			){
+				++$skipped;
+				continue;
+			}
+
+			$text = new FloatingText($entry["world"], (float) $entry["x"], (float) $entry["y"], (float) $entry["z"], $entry["line"]);
+			$pm_world = $pm_world_manager->getWorldByName($text->world);
+			$world_instance = $pm_world !== null ? $this->world_manager->getNullable($pm_world) : null;
+
+			$this->loader->getDatabase()->add($text, static function(int $id) use($world_instance, $text) : void{
+				$world_instance?->add($id, $text);
+			});
+			++$imported;
+		}
+
+		$sender->sendMessage(TextFormat::GREEN . "Imported {$imported} floating text(s) from " . TextFormat::WHITE . "exports/{$filename}");
+		if($skipped > 0){
+			$sender->sendMessage(TextFormat::YELLOW . "Skipped {$skipped} malformed entr" . ($skipped === 1 ? "y" : "ies") . " in the file.");
+		}
 	}
 
 	public function onCommand(CommandSender $sender, Command $command, string $label, array $args) : bool{

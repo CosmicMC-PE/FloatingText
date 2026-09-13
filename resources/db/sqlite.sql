@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS floating_texts(
 SELECT id, world, x, y, z, line FROM floating_texts WHERE world=:world;
 -- #  }
 
+-- #  { export
+SELECT id, world, x, y, z, line FROM floating_texts;
+-- #  }
+
 -- #  { add
 -- #    :world string
 -- #    :x float

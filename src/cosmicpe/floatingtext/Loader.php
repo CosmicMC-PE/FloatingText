@@ -40,7 +40,7 @@ final class Loader extends PluginBase{
 			throw new RuntimeException("Cannot find command \"floatingtext\"");
 		}
 		$service = new FloatingTextService($this->database, $this->world_manager);
-		$command->setExecutor(new FloatingTextCommandExecutor($service, $this->world_manager, new FloatingTextForm($service)));
+		$command->setExecutor(new FloatingTextCommandExecutor($service, $this->world_manager, new FloatingTextForm($service), $this));
 
 		$this->registerPlaceholders();
 	}

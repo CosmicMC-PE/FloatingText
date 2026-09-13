@@ -15,6 +15,7 @@ final class Database{
 
 	private const INIT = "floatingtexts.init";
 	private const LOAD = "floatingtexts.load";
+	private const EXPORT = "floatingtexts.export";
 	private const ADD = "floatingtexts.add";
 	private const UPDATE = "floatingtexts.update";
 	private const REMOVE = "floatingtexts.remove";
@@ -41,6 +42,19 @@ final class Database{
 	 */
 	public function load(string $world, Closure $callback) : void{
 		$this->connector->executeSelect(self::LOAD, ["world" => $world], static function(array $rows) use($callback) : void{
+			$texts = [];
+			foreach($rows as ["id" => $id, "world" => $world, "x" => $x, "y" => $y, "z" => $z, "line" => $line]){
+				$texts[$id] = new FloatingText($world, $x, $y, $z, $line);
+			}
+			$callback($texts);
+		});
+	}
+
+	/**
+	 * @param Closure(array<int, FloatingText>) : void $callback
+	 */
+	public function loadAll(Closure $callback) : void{
+		$this->connector->executeSelect(self::EXPORT, [], static function(array $rows) use($callback) : void{
 			$texts = [];
 			foreach($rows as ["id" => $id, "world" => $world, "x" => $x, "y" => $y, "z" => $z, "line" => $line]){
 				$texts[$id] = new FloatingText($world, $x, $y, $z, $line);
