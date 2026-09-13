@@ -14,6 +14,8 @@ use pocketmine\command\utils\CommandException;
 use pocketmine\player\Player;
 use pocketmine\utils\TextFormat;
 use pocketmine\world\Position;
+use function abs;
+use function array_keys;
 use function array_map;
 use function array_pop;
 use function array_shift;
@@ -436,9 +438,8 @@ final class FloatingTextCommandExecutor implements CommandExecutor{
 			throw new CommandException("File exports/{$filename} is not a valid floating text export.");
 		}
 
-		$pm_world_manager = $this->loader->getServer()->getWorldManager();
-		$imported = 0;
-		$skipped = 0;
+		$to_import = [];
+		$invalid = 0;
 		foreach($data as $entry){
 			if(
 				!is_array($entry) ||
@@ -447,23 +448,76 @@ final class FloatingTextCommandExecutor implements CommandExecutor{
 				!is_numeric($entry["x"]) || !is_numeric($entry["y"]) || !is_numeric($entry["z"]) ||
 				!is_string($entry["line"])
 			){
-				++$skipped;
+				++$invalid;
 				continue;
 			}
 
-			$text = new FloatingText($entry["world"], (float) $entry["x"], (float) $entry["y"], (float) $entry["z"], $entry["line"]);
-			$pm_world = $pm_world_manager->getWorldByName($text->world);
-			$world_instance = $pm_world !== null ? $this->world_manager->getNullable($pm_world) : null;
-
-			$this->loader->getDatabase()->add($text, static function(int $id) use($world_instance, $text) : void{
-				$world_instance?->add($id, $text);
-			});
-			++$imported;
+			$to_import[] = new FloatingText($entry["world"], (float) $entry["x"], (float) $entry["y"], (float) $entry["z"], $entry["line"]);
 		}
 
-		$sender->sendMessage(TextFormat::GREEN . "Imported {$imported} floating text(s) from " . TextFormat::WHITE . "exports/{$filename}");
-		if($skipped > 0){
-			$sender->sendMessage(TextFormat::YELLOW . "Skipped {$skipped} malformed entr" . ($skipped === 1 ? "y" : "ies") . " in the file.");
+		if(count($to_import) === 0){
+			$sender->sendMessage(TextFormat::YELLOW . "Nothing to import from exports/{$filename}" . ($invalid > 0 ? " ({$invalid} invalid entries)" : "") . ".");
+			return;
+		}
+
+		$worlds = [];
+		foreach($to_import as $text){
+			$worlds[$text->world] = true;
+		}
+		$worlds = array_keys($worlds);
+
+		// Floating texts already present (by world+position+line) are skipped instead of duplicated,
+		// so re-running an import (or importing overlapping exports) is safe.
+		$existing_by_world = [];
+		$pending = count($worlds);
+		$finish = function() use(&$existing_by_world, $to_import, $sender, $filename, $invalid) : void{
+			$imported = 0;
+			$duplicates = 0;
+			$pm_world_manager = $this->loader->getServer()->getWorldManager();
+			foreach($to_import as $text){
+				$is_duplicate = false;
+				foreach($existing_by_world[$text->world] ?? [] as $existing_text){
+					if(
+						$existing_text->line === $text->line &&
+						abs($existing_text->x - $text->x) < 0.001 &&
+						abs($existing_text->y - $text->y) < 0.001 &&
+						abs($existing_text->z - $text->z) < 0.001
+					){
+						$is_duplicate = true;
+						break;
+					}
+				}
+
+				if($is_duplicate){
+					++$duplicates;
+					continue;
+				}
+
+				$pm_world = $pm_world_manager->getWorldByName($text->world);
+				$world_instance = $pm_world !== null ? $this->world_manager->getNullable($pm_world) : null;
+				$this->loader->getDatabase()->add($text, static function(int $id) use($world_instance, $text) : void{
+					$world_instance?->add($id, $text);
+				});
+				++$imported;
+			}
+
+			$sender->sendMessage(TextFormat::GREEN . "Imported {$imported} floating text(s) from " . TextFormat::WHITE . "exports/{$filename}");
+			if($duplicates > 0){
+				$sender->sendMessage(TextFormat::YELLOW . "Skipped {$duplicates} entr" . ($duplicates === 1 ? "y" : "ies") . " that already existed (same world, position and text).");
+			}
+			if($invalid > 0){
+				$sender->sendMessage(TextFormat::YELLOW . "Skipped {$invalid} malformed entr" . ($invalid === 1 ? "y" : "ies") . " in the file.");
+			}
+		};
+
+		foreach($worlds as $world){
+			$this->loader->getDatabase()->load($world, function(array $texts) use($world, &$existing_by_world, &$pending, $finish) : void{
+				$existing_by_world[$world] = $texts;
+				--$pending;
+				if($pending === 0){
+					$finish();
+				}
+			});
 		}
 	}
 
